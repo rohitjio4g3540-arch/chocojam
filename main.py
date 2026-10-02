@@ -182,12 +182,13 @@ def generate_response(client, input_text, memory, tool_result=None):
 
     if tool_result is not None:
         system_content += (
-            "\n\nA tool was executed for this request.\n"
-            "Use its results when answering the user.\n"
-            "Do not invent facts that are not supported by the tool results.\n"
+            "\n\nTools were executed for this request.\n"
+            "Use their results when answering the user.\n"
+            "Treat tool results as evidence and do not invent facts "
+            "that are not supported by them.\n"
             "When using information from web results, preserve the source "
             "title and URL so the caller can verify it.\n\n"
-            f"Tool result:\n{json.dumps(tool_result, ensure_ascii=False)}"
+            f"Tool results:\n{json.dumps(tool_result, ensure_ascii=False)}"
         )
 
     response = client.chat.completions.create(
@@ -210,49 +211,81 @@ def generate_response(client, input_text, memory, tool_result=None):
 def run_agent_task(client, input_text):
     memory = build_memory()
 
-    tool_decision = choose_tool(
-        client,
-        input_text,
-        memory,
-    )
-
-    tool_result = None
-    tool_used = None
+    tool_results = []
+    tool_used = []
     sources = []
 
-    if tool_decision.get("use_tool") is True:
+    current_request = input_text
+
+    for step in range(3):
+        tool_decision = choose_tool(
+            client,
+            current_request,
+            memory,
+        )
+
+        if tool_decision.get("use_tool") is not True:
+            break
+
         tool_name = tool_decision.get("tool")
         arguments = tool_decision.get("arguments", {})
 
         try:
-            tool_result = execute_tool(
+            result = execute_tool(
                 tool_name,
                 **arguments,
             )
 
-            tool_used = tool_name
+            tool_results.append(
+                {
+                    "step": step + 1,
+                    "tool": tool_name,
+                    "result": result,
+                }
+            )
 
-            if tool_name == "web_search" and isinstance(tool_result, list):
-                sources = [
-                    {
-                        "title": result.get("title", ""),
-                        "url": result.get("url", ""),
-                        "snippet": result.get("snippet", ""),
-                    }
-                    for result in tool_result
-                    if result.get("url")
-                ]
+            tool_used.append(tool_name)
+
+            if tool_name == "web_search" and isinstance(result, list):
+                sources.extend(
+                    [
+                        {
+                            "title": item.get("title", ""),
+                            "url": item.get("url", ""),
+                            "snippet": item.get("snippet", ""),
+                        }
+                        for item in result
+                        if item.get("url")
+                    ]
+                )
+
+            current_request = (
+                f"Original user request:\n{input_text}\n\n"
+                f"Previous tool result:\n"
+                f"{json.dumps(result, ensure_ascii=False)}\n\n"
+                "Decide whether another tool is needed to complete "
+                "the original request."
+            )
 
         except Exception as error:
-            tool_result = {
-                "error": str(error)
-            }
+            tool_results.append(
+                {
+                    "step": step + 1,
+                    "tool": tool_name,
+                    "error": str(error),
+                }
+            )
+            break
+
+    combined_tool_result = {
+        "steps": tool_results
+    }
 
     response_text = generate_response(
         client,
         input_text,
         memory,
-        tool_result,
+        combined_tool_result if tool_results else None,
     )
 
     return {
