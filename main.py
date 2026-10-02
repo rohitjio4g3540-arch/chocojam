@@ -9,7 +9,7 @@ app = FastAPI()
  
 API_KEY = os.getenv("v1.CmQKHHN0YXRpY2tleS1lMDBndGY0NWdjYjF6MG1ieHcSIXNlcnZpY2VhY2NvdW50LWUwMGd3a3Byd3d0cjB3MHQwMjIMCIWF-9UGELns8IEBOgwIhIiToQcQgPbpvAFAAloDZTAw.AAAAAAAAAAF1AfL-ESS6IayJQJQktOifawvTk-HeBS15MbrrdMwndKEJXxZkxsc_znkWcBCq2MAObVqMV-76Duai16WmOToA") 
  
-MODEL_URL = "https://api.tokenfactory.nebius.com/v1/chat/completions"
+MODEL_URL = "https://api.tokenfactory.nebius.com/v1/"
 
 
 @app.get("/")
