@@ -1,3 +1,4 @@
+import json
 import os
 
 from dotenv import load_dotenv
@@ -14,7 +15,10 @@ from memory.memory_manager import (
 )
 
 from tools.web_search import web_search
-from tools.tool_registry import list_tools
+from tools.tool_registry import (
+    list_tools,
+    execute_tool,
+)
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -58,25 +62,45 @@ def get_tools():
     }
 
 
-@app.post("/ask-model")
-def ask_model(input_text: str):
+def get_model_client():
     api_key = os.getenv("NEBIUS_API_KEY")
 
     if not api_key:
-        return {
-            "error": "NEBIUS_API_KEY is not loaded"
-        }
+        raise ValueError("NEBIUS_API_KEY is not loaded")
 
-    client = OpenAI(
+    return OpenAI(
         base_url=NEBIUS_BASE_URL,
         api_key=api_key,
     )
 
-    memory = {
+
+def build_memory():
+    return {
         "profile": get_profile(),
         "projects": get_projects(),
         "knowledge": get_knowledge(),
     }
+
+
+def build_tool_descriptions():
+    return [
+        {
+            "name": "web_search",
+            "description": (
+                "Search the public web for current information. "
+                "Use this when the user needs research, current facts, "
+                "sources, or information that may have changed."
+            ),
+            "parameters": {
+                "query": "string",
+                "max_results": "integer, optional",
+            },
+        }
+    ]
+
+
+def choose_tool(client, input_text, memory):
+    tool_descriptions = build_tool_descriptions()
 
     response = client.chat.completions.create(
         model=MODEL,
@@ -84,9 +108,16 @@ def ask_model(input_text: str):
             {
                 "role": "system",
                 "content": (
-                    "You are ChocoJam, a personal second-brain AI agent. "
-                    "Use the provided memory as context when relevant.\n\n"
-                    f"Memory:\n{memory}"
+                    "You are the tool-selection component of ChocoJam.\n\n"
+                    "Decide whether the user's request requires a tool.\n"
+                    "Available tools:\n"
+                    f"{json.dumps(tool_descriptions, indent=2)}\n\n"
+                    "Return ONLY valid JSON in this format:\n"
+                    '{"use_tool": false}\n'
+                    "or\n"
+                    '{"use_tool": true, "tool": "web_search", '
+                    '"arguments": {"query": "...", "max_results": 5}}\n\n'
+                    f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
                 ),
             },
             {
@@ -96,7 +127,86 @@ def ask_model(input_text: str):
         ],
     )
 
-    response_text = response.choices[0].message.content
+    content = response.choices[0].message.content.strip()
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return {
+            "use_tool": False
+        }
+
+
+def generate_response(client, input_text, memory, tool_result=None):
+    system_content = (
+        "You are ChocoJam, a personal second-brain AI agent. "
+        "Use the provided memory as context when relevant.\n\n"
+        f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
+    )
+
+    if tool_result is not None:
+        system_content += (
+            "\n\nA tool was executed for this request. "
+            "Use its results when answering the user.\n\n"
+            f"Tool result:\n{json.dumps(tool_result, ensure_ascii=False)}"
+        )
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": system_content,
+            },
+            {
+                "role": "user",
+                "content": input_text,
+            },
+        ],
+    )
+
+    return response.choices[0].message.content
+
+
+@app.post("/ask-model")
+def ask_model(input_text: str):
+    try:
+        client = get_model_client()
+    except ValueError as error:
+        return {
+            "error": str(error)
+        }
+
+    memory = build_memory()
+
+    tool_decision = choose_tool(
+        client,
+        input_text,
+        memory,
+    )
+
+    tool_result = None
+
+    if tool_decision.get("use_tool") is True:
+        tool_name = tool_decision.get("tool")
+        arguments = tool_decision.get("arguments", {})
+
+        try:
+            tool_result = execute_tool(
+                tool_name,
+                **arguments,
+            )
+        except Exception as error:
+            tool_result = {
+                "error": str(error)
+            }
+
+    response_text = generate_response(
+        client,
+        input_text,
+        memory,
+        tool_result,
+    )
 
     if input_text.lower().startswith("remember that"):
         project_text = input_text[len("remember that"):].strip()
@@ -112,5 +222,10 @@ def ask_model(input_text: str):
     )
 
     return {
-        "response": response_text
+        "response": response_text,
+        "tool_used": (
+            tool_decision.get("tool")
+            if tool_decision.get("use_tool") is True
+            else None
+        ),
     }
