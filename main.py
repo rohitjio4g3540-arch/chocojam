@@ -119,7 +119,48 @@ def build_tool_descriptions():
     ]
 
 
-def choose_tool(client, input_text, memory):
+def create_task_plan(client, input_text, memory):
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are the planning component of ChocoJam.\n\n"
+                    "Create a short execution plan for the user's request.\n"
+                    "The plan must contain only the necessary steps.\n"
+                    "Do not perform the task.\n"
+                    "Do not invent information.\n\n"
+                    "Available tools:\n"
+                    f"{json.dumps(build_tool_descriptions(), indent=2)}\n\n"
+                    "Memory:\n"
+                    f"{json.dumps(memory, ensure_ascii=False)}\n\n"
+                    "Return ONLY valid JSON in this format:\n"
+                    "{"
+                    '"goal": "short description", '
+                    '"steps": ["step 1", "step 2"]'
+                    "}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": input_text,
+            },
+        ],
+    )
+
+    content = response.choices[0].message.content.strip()
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return {
+            "goal": input_text,
+            "steps": [],
+        }
+
+
+def choose_tool(client, input_text, memory, plan):
     tool_descriptions = build_tool_descriptions()
 
     response = client.chat.completions.create(
@@ -130,19 +171,20 @@ def choose_tool(client, input_text, memory):
                 "content": (
                     "You are the tool-selection component of ChocoJam.\n\n"
                     "Decide whether the user's request requires a tool.\n"
-                    "Only select a tool when it is genuinely useful for "
-                    "answering the user's request.\n\n"
+                    "Only select a tool when it is genuinely useful.\n\n"
                     "Available tools:\n"
                     f"{json.dumps(tool_descriptions, indent=2)}\n\n"
+                    f"Current execution plan:\n"
+                    f"{json.dumps(plan, ensure_ascii=False)}\n\n"
                     "Return ONLY valid JSON in this format:\n"
                     '{"use_tool": false}\n'
                     "or\n"
                     '{"use_tool": true, "tool": "web_search", '
                     '"arguments": {"query": "...", "max_results": 5}}\n\n'
-                    "For list_files, use:\n"
+                    "For list_files:\n"
                     '{"use_tool": true, "tool": "list_files", '
                     '"arguments": {}}\n\n'
-                    "For read_file, use:\n"
+                    "For read_file:\n"
                     '{"use_tool": true, "tool": "read_file", '
                     '"arguments": {"path": "example.txt"}}\n\n'
                     f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
@@ -165,19 +207,19 @@ def choose_tool(client, input_text, memory):
         }
 
 
-def generate_response(client, input_text, memory, tool_result=None):
+def generate_response(client, input_text, memory, plan, tool_result=None):
     system_content = (
         "You are ChocoJam, a personal second-brain AI agent.\n\n"
         "Your primary goal is to answer the user's actual request clearly "
         "and directly.\n\n"
-        "Use memory only when it is relevant to the user's request.\n"
+        "Use memory only when relevant.\n"
         "Do not add unsolicited recommendations, project advice, "
         "hackathon commentary, or unrelated context.\n"
-        "Do not mention ChocoJam's internal architecture unless the user "
-        "asks about it.\n"
+        "Do not mention internal architecture unless asked.\n"
         "Do not force the user's current project into unrelated answers.\n"
         "Do not invent facts.\n\n"
-        f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
+        f"Memory:\n{json.dumps(memory, ensure_ascii=False)}\n\n"
+        f"Execution plan:\n{json.dumps(plan, ensure_ascii=False)}"
     )
 
     if tool_result is not None:
@@ -211,6 +253,12 @@ def generate_response(client, input_text, memory, tool_result=None):
 def run_agent_task(client, input_text):
     memory = build_memory()
 
+    plan = create_task_plan(
+        client,
+        input_text,
+        memory,
+    )
+
     tool_results = []
     tool_used = []
     sources = []
@@ -222,6 +270,7 @@ def run_agent_task(client, input_text):
             client,
             current_request,
             memory,
+            plan,
         )
 
         if tool_decision.get("use_tool") is not True:
@@ -261,6 +310,8 @@ def run_agent_task(client, input_text):
 
             current_request = (
                 f"Original user request:\n{input_text}\n\n"
+                f"Execution plan:\n"
+                f"{json.dumps(plan, ensure_ascii=False)}\n\n"
                 f"Previous tool result:\n"
                 f"{json.dumps(result, ensure_ascii=False)}\n\n"
                 "Decide whether another tool is needed to complete "
@@ -285,11 +336,13 @@ def run_agent_task(client, input_text):
         client,
         input_text,
         memory,
+        plan,
         combined_tool_result if tool_results else None,
     )
 
     return {
         "response": response_text,
+        "plan": plan,
         "tool_used": tool_used,
         "sources": sources,
     }
