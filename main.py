@@ -147,7 +147,10 @@ def generate_response(client, input_text, memory, tool_result=None):
     if tool_result is not None:
         system_content += (
             "\n\nA tool was executed for this request. "
-            "Use its results when answering the user.\n\n"
+            "Use its results when answering the user. "
+            "Do not invent facts that are not supported by the tool results. "
+            "When using information from a web result, preserve the source "
+            "title and URL so the caller can verify it.\n\n"
             f"Tool result:\n{json.dumps(tool_result, ensure_ascii=False)}"
         )
 
@@ -186,6 +189,8 @@ def ask_model(input_text: str):
     )
 
     tool_result = None
+    tool_used = None
+    sources = []
 
     if tool_decision.get("use_tool") is True:
         tool_name = tool_decision.get("tool")
@@ -196,6 +201,20 @@ def ask_model(input_text: str):
                 tool_name,
                 **arguments,
             )
+
+            tool_used = tool_name
+
+            if tool_name == "web_search" and isinstance(tool_result, list):
+                sources = [
+                    {
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "snippet": result.get("snippet", ""),
+                    }
+                    for result in tool_result
+                    if result.get("url")
+                ]
+
         except Exception as error:
             tool_result = {
                 "error": str(error)
@@ -223,9 +242,6 @@ def ask_model(input_text: str):
 
     return {
         "response": response_text,
-        "tool_used": (
-            tool_decision.get("tool")
-            if tool_decision.get("use_tool") is True
-            else None
-        ),
+        "tool_used": tool_used,
+        "sources": sources,
     }
