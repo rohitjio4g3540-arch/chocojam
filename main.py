@@ -14,6 +14,7 @@ from memory.memory_manager import (
 )
 
 from tools.web_search import web_search
+from tools.tool_registry import list_tools
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -47,6 +48,13 @@ def get_memory():
 def search_web(query: str, max_results: int = 5):
     return {
         "results": web_search(query, max_results)
+    }
+
+
+@app.get("/tools")
+def get_tools():
+    return {
+        "tools": list_tools()
     }
 
 
