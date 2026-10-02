@@ -13,6 +13,8 @@ from memory.memory_manager import (
     add_conversation,
 )
 
+from tools.web_search import web_search
+
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -26,7 +28,9 @@ NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 
 @app.get("/")
 def root():
-    return {"message": "ChocoJam is running"}
+    return {
+        "message": "ChocoJam is running"
+    }
 
 
 @app.get("/memory")
@@ -39,12 +43,21 @@ def get_memory():
     }
 
 
+@app.get("/search")
+def search_web(query: str, max_results: int = 5):
+    return {
+        "results": web_search(query, max_results)
+    }
+
+
 @app.post("/ask-model")
 def ask_model(input_text: str):
     api_key = os.getenv("NEBIUS_API_KEY")
 
     if not api_key:
-        return {"error": "NEBIUS_API_KEY is not loaded"}
+        return {
+            "error": "NEBIUS_API_KEY is not loaded"
+        }
 
     client = OpenAI(
         base_url=NEBIUS_BASE_URL,
