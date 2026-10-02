@@ -207,15 +207,7 @@ def generate_response(client, input_text, memory, tool_result=None):
     return response.choices[0].message.content
 
 
-@app.post("/ask-model")
-def ask_model(input_text: str):
-    try:
-        client = get_model_client()
-    except ValueError as error:
-        return {
-            "error": str(error)
-        }
-
+def run_agent_task(client, input_text):
     memory = build_memory()
 
     tool_decision = choose_tool(
@@ -263,6 +255,27 @@ def ask_model(input_text: str):
         tool_result,
     )
 
+    return {
+        "response": response_text,
+        "tool_used": tool_used,
+        "sources": sources,
+    }
+
+
+@app.post("/ask-model")
+def ask_model(input_text: str):
+    try:
+        client = get_model_client()
+    except ValueError as error:
+        return {
+            "error": str(error)
+        }
+
+    result = run_agent_task(
+        client,
+        input_text,
+    )
+
     if input_text.lower().startswith("remember that"):
         project_text = input_text[len("remember that"):].strip()
 
@@ -273,11 +286,7 @@ def ask_model(input_text: str):
 
     add_conversation(
         user_message=input_text,
-        assistant_message=response_text,
+        assistant_message=result["response"],
     )
 
-    return {
-        "response": response_text,
-        "tool_used": tool_used,
-        "sources": sources,
-    }
+    return result
