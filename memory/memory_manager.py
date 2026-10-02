@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 
 
 MEMORY_DIR = os.path.dirname(__file__)
@@ -28,8 +29,25 @@ def save_memory(filename, data):
 
 def update_memory(filename, key, value):
     data = load_memory(filename)
+
+    if not isinstance(data, dict):
+        data = {}
+
     data[key] = value
     save_memory(filename, data)
+
+    return data
+
+
+def append_memory(filename, value):
+    data = load_memory(filename)
+
+    if not isinstance(data, list):
+        data = []
+
+    data.append(value)
+    save_memory(filename, data)
+
     return data
 
 
@@ -63,3 +81,22 @@ def get_conversations():
 
 def update_conversations(key, value):
     return update_memory("conversations.json", key, value)
+
+
+def add_conversation(user_message, assistant_message):
+    conversations = get_conversations()
+
+    if not isinstance(conversations, list):
+        conversations = []
+
+    conversations.append(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user": user_message,
+            "assistant": assistant_message,
+        }
+    )
+
+    save_memory("conversations.json", conversations)
+
+    return conversations
