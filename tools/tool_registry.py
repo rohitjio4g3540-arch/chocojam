@@ -12,3 +12,12 @@ def get_tool(name: str):
 
 def list_tools():
     return list(TOOLS.keys())
+
+
+def execute_tool(name: str, **kwargs):
+    tool = get_tool(name)
+
+    if tool is None:
+        raise ValueError(f"Unknown tool: {name}")
+
+    return tool(**kwargs)
