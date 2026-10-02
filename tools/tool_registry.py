@@ -1,8 +1,14 @@
 from tools.web_search import web_search
+from tools.file_tools import (
+    list_files,
+    read_file,
+)
 
 
 TOOLS = {
     "web_search": web_search,
+    "list_files": list_files,
+    "read_file": read_file,
 }
 
 

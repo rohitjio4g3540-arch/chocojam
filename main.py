@@ -95,7 +95,27 @@ def build_tool_descriptions():
                 "query": "string",
                 "max_results": "integer, optional",
             },
-        }
+        },
+        {
+            "name": "list_files",
+            "description": (
+                "List files available inside the ChocoJam project. "
+                "Use this when the user asks what files exist or "
+                "needs to inspect the project structure."
+            ),
+            "parameters": {},
+        },
+        {
+            "name": "read_file",
+            "description": (
+                "Read the contents of a text file inside the ChocoJam "
+                "project. Use this when the user asks about the contents "
+                "of a specific project file."
+            ),
+            "parameters": {
+                "path": "string",
+            },
+        },
     ]
 
 
@@ -119,6 +139,12 @@ def choose_tool(client, input_text, memory):
                     "or\n"
                     '{"use_tool": true, "tool": "web_search", '
                     '"arguments": {"query": "...", "max_results": 5}}\n\n'
+                    "For list_files, use:\n"
+                    '{"use_tool": true, "tool": "list_files", '
+                    '"arguments": {}}\n\n'
+                    "For read_file, use:\n"
+                    '{"use_tool": true, "tool": "read_file", '
+                    '"arguments": {"path": "example.txt"}}\n\n'
                     f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
                 ),
             },
