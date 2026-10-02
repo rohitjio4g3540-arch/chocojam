@@ -110,6 +110,8 @@ def choose_tool(client, input_text, memory):
                 "content": (
                     "You are the tool-selection component of ChocoJam.\n\n"
                     "Decide whether the user's request requires a tool.\n"
+                    "Only select a tool when it is genuinely useful for "
+                    "answering the user's request.\n\n"
                     "Available tools:\n"
                     f"{json.dumps(tool_descriptions, indent=2)}\n\n"
                     "Return ONLY valid JSON in this format:\n"
@@ -139,17 +141,25 @@ def choose_tool(client, input_text, memory):
 
 def generate_response(client, input_text, memory, tool_result=None):
     system_content = (
-        "You are ChocoJam, a personal second-brain AI agent. "
-        "Use the provided memory as context when relevant.\n\n"
+        "You are ChocoJam, a personal second-brain AI agent.\n\n"
+        "Your primary goal is to answer the user's actual request clearly "
+        "and directly.\n\n"
+        "Use memory only when it is relevant to the user's request.\n"
+        "Do not add unsolicited recommendations, project advice, "
+        "hackathon commentary, or unrelated context.\n"
+        "Do not mention ChocoJam's internal architecture unless the user "
+        "asks about it.\n"
+        "Do not force the user's current project into unrelated answers.\n"
+        "Do not invent facts.\n\n"
         f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
     )
 
     if tool_result is not None:
         system_content += (
-            "\n\nA tool was executed for this request. "
-            "Use its results when answering the user. "
-            "Do not invent facts that are not supported by the tool results. "
-            "When using information from a web result, preserve the source "
+            "\n\nA tool was executed for this request.\n"
+            "Use its results when answering the user.\n"
+            "Do not invent facts that are not supported by the tool results.\n"
+            "When using information from web results, preserve the source "
             "title and URL so the caller can verify it.\n\n"
             f"Tool result:\n{json.dumps(tool_result, ensure_ascii=False)}"
         )
