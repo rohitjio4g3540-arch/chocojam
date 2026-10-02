@@ -128,12 +128,12 @@ def create_task_plan(client, input_text, memory):
                 "content": (
                     "You are the planning component of ChocoJam.\n\n"
                     "Create a short execution plan for the user's request.\n"
-                    "The plan must contain only the necessary steps.\n"
+                    "The plan must contain only necessary steps.\n"
                     "Do not perform the task.\n"
                     "Do not invent information.\n\n"
                     "Available tools:\n"
                     f"{json.dumps(build_tool_descriptions(), indent=2)}\n\n"
-                    "Memory:\n"
+                    f"Memory:\n"
                     f"{json.dumps(memory, ensure_ascii=False)}\n\n"
                     "Return ONLY valid JSON in this format:\n"
                     "{"
@@ -160,22 +160,36 @@ def create_task_plan(client, input_text, memory):
         }
 
 
-def choose_tool(client, input_text, memory, plan):
-    tool_descriptions = build_tool_descriptions()
-
+def choose_tool(
+    client,
+    input_text,
+    memory,
+    plan,
+    completed_steps,
+    tool_results,
+):
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "You are the tool-selection component of ChocoJam.\n\n"
-                    "Decide whether the user's request requires a tool.\n"
-                    "Only select a tool when it is genuinely useful.\n\n"
+                    "You are the execution component of ChocoJam.\n\n"
+                    "Choose the SINGLE next tool required to advance "
+                    "the user's request.\n\n"
+                    "Follow the execution plan.\n"
+                    "Do not repeat work that has already been completed.\n"
+                    "If the available evidence is already sufficient, "
+                    "return use_tool false.\n"
+                    "Do not select a tool merely because one exists.\n\n"
                     "Available tools:\n"
-                    f"{json.dumps(tool_descriptions, indent=2)}\n\n"
-                    f"Current execution plan:\n"
+                    f"{json.dumps(build_tool_descriptions(), indent=2)}\n\n"
+                    f"Execution plan:\n"
                     f"{json.dumps(plan, ensure_ascii=False)}\n\n"
+                    f"Completed tool steps:\n"
+                    f"{json.dumps(completed_steps, ensure_ascii=False)}\n\n"
+                    f"Previous tool results:\n"
+                    f"{json.dumps(tool_results, ensure_ascii=False)}\n\n"
                     "Return ONLY valid JSON in this format:\n"
                     '{"use_tool": false}\n'
                     "or\n"
@@ -186,8 +200,7 @@ def choose_tool(client, input_text, memory, plan):
                     '"arguments": {}}\n\n'
                     "For read_file:\n"
                     '{"use_tool": true, "tool": "read_file", '
-                    '"arguments": {"path": "example.txt"}}\n\n'
-                    f"Memory:\n{json.dumps(memory, ensure_ascii=False)}"
+                    '"arguments": {"path": "example.txt"}}'
                 ),
             },
             {
@@ -207,17 +220,25 @@ def choose_tool(client, input_text, memory, plan):
         }
 
 
-def generate_response(client, input_text, memory, plan, tool_result=None):
+def generate_response(
+    client,
+    input_text,
+    memory,
+    plan,
+    tool_result=None,
+):
     system_content = (
         "You are ChocoJam, a personal second-brain AI agent.\n\n"
-        "Your primary goal is to answer the user's actual request clearly "
-        "and directly.\n\n"
+        "Answer the user's actual request clearly and directly.\n\n"
         "Use memory only when relevant.\n"
         "Do not add unsolicited recommendations, project advice, "
         "hackathon commentary, or unrelated context.\n"
         "Do not mention internal architecture unless asked.\n"
         "Do not force the user's current project into unrelated answers.\n"
-        "Do not invent facts.\n\n"
+        "Do not invent facts.\n"
+        "Clearly distinguish documented facts from inference.\n"
+        "If the available evidence does not establish something, "
+        "say that it is not established.\n\n"
         f"Memory:\n{json.dumps(memory, ensure_ascii=False)}\n\n"
         f"Execution plan:\n{json.dumps(plan, ensure_ascii=False)}"
     )
@@ -226,11 +247,12 @@ def generate_response(client, input_text, memory, plan, tool_result=None):
         system_content += (
             "\n\nTools were executed for this request.\n"
             "Use their results when answering the user.\n"
-            "Treat tool results as evidence and do not invent facts "
-            "that are not supported by them.\n"
-            "When using information from web results, preserve the source "
-            "title and URL so the caller can verify it.\n\n"
-            f"Tool results:\n{json.dumps(tool_result, ensure_ascii=False)}"
+            "Treat tool results as evidence.\n"
+            "Do not invent facts that are not supported by them.\n"
+            "When using information from web results, preserve source "
+            "titles and URLs so the caller can verify them.\n\n"
+            f"Tool results:\n"
+            f"{json.dumps(tool_result, ensure_ascii=False)}"
         )
 
     response = client.chat.completions.create(
@@ -262,15 +284,16 @@ def run_agent_task(client, input_text):
     tool_results = []
     tool_used = []
     sources = []
+    completed_steps = []
 
-    current_request = input_text
-
-    for step in range(3):
+    for step_number in range(3):
         tool_decision = choose_tool(
             client,
-            current_request,
+            input_text,
             memory,
             plan,
+            completed_steps,
+            tool_results,
         )
 
         if tool_decision.get("use_tool") is not True:
@@ -285,15 +308,22 @@ def run_agent_task(client, input_text):
                 **arguments,
             )
 
-            tool_results.append(
+            execution_record = {
+                "step": step_number + 1,
+                "tool": tool_name,
+                "arguments": arguments,
+                "result": result,
+            }
+
+            tool_results.append(execution_record)
+            tool_used.append(tool_name)
+
+            completed_steps.append(
                 {
-                    "step": step + 1,
                     "tool": tool_name,
-                    "result": result,
+                    "arguments": arguments,
                 }
             )
-
-            tool_used.append(tool_name)
 
             if tool_name == "web_search" and isinstance(result, list):
                 sources.extend(
@@ -308,21 +338,12 @@ def run_agent_task(client, input_text):
                     ]
                 )
 
-            current_request = (
-                f"Original user request:\n{input_text}\n\n"
-                f"Execution plan:\n"
-                f"{json.dumps(plan, ensure_ascii=False)}\n\n"
-                f"Previous tool result:\n"
-                f"{json.dumps(result, ensure_ascii=False)}\n\n"
-                "Decide whether another tool is needed to complete "
-                "the original request."
-            )
-
         except Exception as error:
             tool_results.append(
                 {
-                    "step": step + 1,
+                    "step": step_number + 1,
                     "tool": tool_name,
+                    "arguments": arguments,
                     "error": str(error),
                 }
             )
